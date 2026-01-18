@@ -262,7 +262,8 @@ def display_analysis_result(result: dict):
     
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("当前价", f"¥{market_data.get('current_price', 0):.2f}")
-    col2.metric("涨跌幅", f"{market_data.get('change_pct', 0):+.2f}%")
+    change_pct = market_data.get('change_pct', 0)
+    col2.metric("涨跌幅", f"{change_pct:+.2f}%", delta=f"{change_pct:+.2f}%", delta_color="inverse")
     col3.metric("成交量", f"{market_data.get('volume', 0):,.0f}手")
     col4.metric("换手率", f"{market_data.get('turnover_rate', 0):.2f}%")
     
@@ -852,8 +853,8 @@ def _render_task_kline_and_decisions(task: Dict, db: SmartMonitorDB, engine):
                     }
                     
                     action_colors = {
-                        'buy': '#ef5350',
-                        'sell': '#26a69a',
+                        'buy': '#FF0000',
+                        'sell': '#00AA00',
                         'add_position': '#ff9800',
                         'reduce_position': '#9c27b0',
                         'hold': '#607d8b'

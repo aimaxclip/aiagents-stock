@@ -19,41 +19,56 @@ class LowPriceBullSelector:
         self.raw_data = None
         self.selected_stocks = None
     
-    def get_low_price_stocks(self, top_n: int = 5) -> Tuple[bool, Optional[pd.DataFrame], str]:
+    def get_low_price_stocks(self, top_n: int = 5, markets: list = None) -> Tuple[bool, Optional[pd.DataFrame], str]:
         """
         获取低价高成长股票
-        
+
         选股策略：
         - 股价<10元
         - 净利润增长率≥100%
         - 非ST
-        - 非科创板
-        - 非创业板
-        - 沪深A股
+        - 非科创板（如果未选择创业板）
+        - 按市场筛选
         - 成交额由小至大排名
-        
+
         Args:
             top_n: 返回前N只股票
-            
+            markets: 市场列表，如 ["上海主板", "深圳主板", "创业板", "北交所"]
+
         Returns:
             (success, dataframe, message)
         """
         try:
+            # 构建市场筛选条件
+            market_filter = ""
+            if markets:
+                market_conditions = []
+                for market in markets:
+                    if market == "上海主板":
+                        market_conditions.append("上海主板")
+                    elif market == "深圳主板":
+                        market_conditions.append("深圳主板")
+                    elif market == "创业板":
+                        market_conditions.append("创业板")
+                    elif market == "北交所":
+                        market_conditions.append("北交所")
+                if market_conditions:
+                    market_filter = "，" + "或".join(market_conditions)
+
             print(f"\n{'='*60}")
             print(f"🐂 低价擒牛选股 - 数据获取中")
             print(f"{'='*60}")
-            print(f"策略: 股价<10元 + 净利润增长率≥100% + 沪深A股")
+            print(f"策略: 股价<10元 + 净利润增长率≥100%")
+            print(f"市场: {markets if markets else '全部'}")
             print(f"目标: 筛选前{top_n}只股票")
-            
+
             # 构建查询语句（按成交额由小至大排名）
             query = (
-                "股价<10元，"
-                "净利润增长率(净利润同比增长率)≥100%，"
-                "非st，"
-                "非科创板，"
-                "非创业板，"
-                "沪深A股，"
-                "成交额由小至大排名"
+                f"股价<10元，"
+                f"净利润增长率(净利润同比增长率)≥100%，"
+                f"非st，"
+                f"非科创板{market_filter}，"
+                f"成交额由小至大排名"
             )
             
             print(f"\n查询语句: {query}")

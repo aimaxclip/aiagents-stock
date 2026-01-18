@@ -5,12 +5,13 @@ import config
 
 class DeepSeekClient:
     """DeepSeek API客户端"""
-    
+
     def __init__(self, model="deepseek-chat"):
         self.model = model
         self.client = openai.OpenAI(
             api_key=config.DEEPSEEK_API_KEY,
-            base_url=config.DEEPSEEK_BASE_URL
+            base_url=config.DEEPSEEK_BASE_URL,
+            timeout=120.0  # 设置120秒超时，防止请求无限等待
         )
         
     def call_api(self, messages: List[Dict[str, str]], model: Optional[str] = None, 

@@ -5,21 +5,28 @@
 """
 
 import streamlit as st
+import time
 from datetime import datetime, timedelta
+from typing import Dict
 from main_force_analysis import MainForceAnalyzer
 from main_force_pdf_generator import display_report_download_section
 from main_force_history_ui import display_batch_history
+from selector_scheduler import selector_scheduler, run_main_force_selection
 import pandas as pd
 
 def display_main_force_selector():
     """显示主力选股界面"""
 
-    # 检查是否触发批量分析（不立即删除标志）
-    if st.session_state.get('main_force_batch_trigger'):
-        run_main_force_batch_analysis()
+    # 1. 优先检查是否有后台任务在运行
+    if check_and_display_background_task():
         return
 
-    # 检查是否查看历史记录
+    # 2. 检查是否触发批量分析（改为后台启动）
+    if st.session_state.get('main_force_batch_trigger'):
+        start_background_batch_analysis()
+        return
+
+    # 3. 检查是否查看历史记录
     if st.session_state.get('main_force_view_history'):
         display_batch_history()
         return
@@ -97,6 +104,23 @@ def display_main_force_selector():
 
     # 高级选项
     with st.expander("⚙️ 高级筛选参数"):
+        # 市场选择
+        st.markdown("**市场选择**")
+        market_options = {
+            "上海主板": "上海主板",
+            "深圳主板": "深圳主板",
+            "创业板": "创业板",
+            "北交所": "北交所"
+        }
+        selected_markets = st.multiselect(
+            "选择市场",
+            options=list(market_options.keys()),
+            default=["上海主板", "深圳主板"],
+            help="选择要筛选的市场，默认为沪深主板"
+        )
+
+        st.markdown("---")
+
         col1, col2, col3 = st.columns(3)
 
         with col1:
@@ -140,12 +164,73 @@ def display_main_force_selector():
     st.markdown("---")
 
     # 开始分析按钮
-    if st.button("🚀 开始主力选股", type="primary", width='content'):
+    btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
 
-        with st.spinner("正在获取数据并分析，这可能需要几分钟..."):
+    with btn_col1:
+        start_button = st.button("🚀 开始主力选股", type="primary", width='content')
+
+    with btn_col2:
+        background_button = st.button("🔄 后台选股", width='content', help="提交后台任务，可离开页面")
+
+    # 后台选股处理
+    if background_button:
+        # 验证市场选择
+        if not selected_markets:
+            st.error("请至少选择一个市场")
+            st.stop()
+
+        # 准备参数
+        params = {
+            'start_date': start_date,
+            'days_ago': days_ago,
+            'final_n': final_n,
+            'max_range_change': max_change,
+            'min_market_cap': min_cap,
+            'max_market_cap': max_cap,
+            'markets': selected_markets,
+            'model': model
+        }
+
+        # 启动后台任务
+        result = selector_scheduler.start_background_selection(
+            selector_type='main_force',
+            selection_func=run_main_force_selection,
+            params=params
+        )
+
+        if result['success']:
+            st.session_state.main_force_bg_task_id = result['task_id']
+            st.success(f"✅ 后台选股任务已启动！您可以离开页面，稍后返回查看结果。")
+            time.sleep(2)
+            st.rerun()
+        else:
+            st.error(f"❌ {result['message']}")
+
+    # 前台选股处理
+    if start_button:
+
+        # 验证市场选择
+        if not selected_markets:
+            st.error("请至少选择一个市场")
+            st.stop()
+
+        # 使用status容器显示详细进度
+        with st.status("🔄 主力选股分析进行中...", expanded=True) as status:
+            st.write("⏳ 正在初始化分析器...")
 
             # 创建分析器
             analyzer = MainForceAnalyzer(model=model)
+
+            st.write("📊 正在获取主力资金数据...")
+            st.write("   - 获取主力净流入TOP100股票")
+            st.write("   - 筛选符合条件的标的")
+
+            st.write("🤖 AI分析师团队分析中...")
+            st.write("   - 💰 资金流向分析师")
+            st.write("   - 📊 行业板块分析师")
+            st.write("   - 📈 财务基本面分析师")
+            st.write("")
+            st.write("⚠️ 提示：此过程需要5-10分钟，请耐心等待...")
 
             # 运行分析
             result = analyzer.run_full_analysis(
@@ -154,12 +239,18 @@ def display_main_force_selector():
                 final_n=final_n,
                 max_range_change=max_change,
                 min_market_cap=min_cap,
-                max_market_cap=max_cap
+                max_market_cap=max_cap,
+                markets=selected_markets
             )
 
             # 保存结果到session_state
             st.session_state.main_force_result = result
             st.session_state.main_force_analyzer = analyzer
+
+            if result['success']:
+                status.update(label="✅ 分析完成！", state="complete", expanded=False)
+            else:
+                status.update(label="❌ 分析失败", state="error", expanded=True)
 
         # 显示结果
         if result['success']:
@@ -400,7 +491,7 @@ def display_recommendation_detail(rec: dict):
             if change_keys:
                 change_value = stock_data.get(change_keys[0], 'N/A')
                 if isinstance(change_value, (int, float)):
-                    st.metric("区间涨跌幅", f"{change_value:.2f}%")
+                    st.metric("区间涨跌幅", f"{change_value:.2f}%", delta=f"{change_value:.2f}%", delta_color="inverse")
                 else:
                     st.metric("区间涨跌幅", str(change_value))
 
@@ -996,4 +1087,258 @@ def display_main_force_batch_results(batch_results):
 
         df_failed = pd.DataFrame(failed_data)
         st.dataframe(df_failed, width='content')
+
+
+# ==================== 后台任务相关函数 ====================
+
+def check_and_display_background_task() -> bool:
+    """
+    检查是否有后台任务在运行，并显示进度
+
+    Returns:
+        bool: True 表示有任务在运行或刚完成，已显示相应界面
+    """
+    from main_force_batch_scheduler import main_force_batch_scheduler
+    from main_force_batch_db import batch_db
+
+    # 1. 检查主力选股单次后台任务
+    running_tasks = selector_scheduler.get_running_tasks('main_force')
+    if running_tasks:
+        task = running_tasks[0]
+        st.info("⏳ 后台主力选股任务运行中...")
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            progress = task.get('progress_percent', 0) / 100
+            st.progress(progress)
+            st.caption(f"当前步骤: {task.get('current_step', '处理中...')} ({task.get('progress_percent', 0):.0f}%)")
+
+        with col2:
+            if st.button("取消任务", type="secondary", key="cancel_main_force_bg"):
+                selector_scheduler.cancel_task(task['task_id'])
+                st.rerun()
+
+        st.markdown("---")
+        st.success("💡 您可以离开此页面，任务将在后台继续运行。稍后回来查看结果。")
+
+        time.sleep(3)
+        st.rerun()
+        return True
+
+    # 检查主力选股后台任务是否完成
+    if 'main_force_bg_task_id' in st.session_state:
+        task = selector_scheduler.get_task_status(st.session_state.main_force_bg_task_id)
+        if task and task['status'] == 'completed':
+            st.success("✅ 后台主力选股任务已完成!")
+            if task.get('results') and task['results'].get('success'):
+                st.session_state.main_force_result = task['results']
+            del st.session_state.main_force_bg_task_id
+            st.rerun()
+        elif task and task['status'] == 'failed':
+            st.error(f"❌ 后台选股失败: {task.get('error_message', '未知错误')}")
+            del st.session_state.main_force_bg_task_id
+
+    # 2. 检查批量分析后台任务
+    task = batch_db.get_running_task()
+
+    if task:
+        status = task.get('status')
+        if status in ['pending', 'running']:
+            display_task_progress(task)
+            return True
+
+    # 检查是否有刚完成的任务需要显示
+    if st.session_state.get('show_task_completed'):
+        task_id = st.session_state.get('completed_task_id')
+        if task_id:
+            task = batch_db.get_task_by_id(task_id)
+            if task:
+                display_task_completed(task)
+                return True
+
+    return False
+
+
+def display_task_progress(task: Dict):
+    """显示任务进度界面"""
+    from main_force_batch_scheduler import main_force_batch_scheduler
+
+    st.markdown("## 🔄 批量分析进行中")
+    st.markdown("---")
+
+    # 任务信息
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("总计", f"{task['total_count']} 只")
+    with col2:
+        st.metric("已完成", f"{task['completed_count']} 只")
+    with col3:
+        st.metric("成功", f"{task['success_count']} 只")
+    with col4:
+        st.metric("失败", f"{task['failed_count']} 只")
+
+    # 进度条
+    progress = task.get('progress_percent', 0) / 100
+    st.progress(progress)
+
+    # 当前状态
+    current_stock = task.get('current_stock', '')
+    status = task.get('status', 'pending')
+
+    if status == 'pending':
+        st.info("⏳ 准备中...")
+    elif current_stock:
+        st.info(f"📊 正在分析: {current_stock}")
+    else:
+        st.info("🔄 处理中...")
+
+    # 分析模式信息
+    mode = task.get('analysis_mode', 'parallel')
+    workers = task.get('max_workers', 3)
+    mode_text = "顺序分析" if mode == 'sequential' else f"并行分析 ({workers}线程)"
+    st.caption(f"分析模式: {mode_text} | 任务ID: {task['task_id'][:8]}...")
+
+    st.markdown("---")
+
+    # 操作按钮
+    col_cancel, col_refresh, col_history = st.columns(3)
+
+    with col_cancel:
+        if st.button("❌ 取消任务", type="secondary"):
+            result = main_force_batch_scheduler.cancel_task()
+            if result['success']:
+                st.warning(result['message'])
+            else:
+                st.error(result['error'])
+
+    with col_refresh:
+        if st.button("🔄 刷新进度"):
+            st.rerun()
+
+    with col_history:
+        if st.button("📚 查看历史"):
+            st.session_state.main_force_view_history = True
+            st.rerun()
+
+    # 提示信息
+    st.success("💡 您可以离开此页面，任务将在后台继续运行。稍后回来查看结果。")
+
+    # 自动刷新（每5秒）
+    time.sleep(5)
+    st.rerun()
+
+
+def display_task_completed(task: Dict):
+    """显示任务完成界面"""
+    st.markdown("## ✅ 批量分析完成")
+    st.markdown("---")
+
+    # 统计信息
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("成功分析", f"{task['success_count']} 只")
+    with col2:
+        st.metric("失败", f"{task['failed_count']} 只")
+    with col3:
+        # 计算耗时
+        if task.get('started_at') and task.get('completed_at'):
+            try:
+                start = datetime.strptime(str(task['started_at']), "%Y-%m-%d %H:%M:%S")
+                end = datetime.strptime(str(task['completed_at']), "%Y-%m-%d %H:%M:%S")
+                elapsed = (end - start).total_seconds()
+                st.metric("总耗时", f"{elapsed/60:.1f} 分钟")
+            except:
+                st.metric("总耗时", "N/A")
+
+    st.success("🎉 批量分析已完成！结果已保存到历史记录。")
+
+    # 操作按钮
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("📚 查看历史记录", type="primary"):
+            st.session_state.main_force_view_history = True
+            st.session_state.show_task_completed = False
+            st.session_state.completed_task_id = None
+            st.rerun()
+
+    with col2:
+        if st.button("🔙 返回主力选股"):
+            st.session_state.show_task_completed = False
+            st.session_state.completed_task_id = None
+            st.rerun()
+
+
+def start_background_batch_analysis():
+    """启动后台批量分析任务"""
+    from main_force_batch_scheduler import main_force_batch_scheduler
+
+    stock_codes = st.session_state.get('main_force_batch_codes', [])
+
+    if not stock_codes:
+        st.error("未找到股票代码列表")
+        if 'main_force_batch_trigger' in st.session_state:
+            del st.session_state.main_force_batch_trigger
+        return
+
+    st.markdown("## 🚀 启动批量分析")
+    st.markdown("---")
+
+    st.info(f"即将分析 {len(stock_codes)} 只股票：{', '.join(stock_codes[:10])}{'...' if len(stock_codes) > 10 else ''}")
+
+    # 分析选项
+    col1, col2 = st.columns(2)
+
+    with col1:
+        analysis_mode = st.selectbox(
+            "分析模式",
+            options=["parallel", "sequential"],
+            format_func=lambda x: "并行分析（快速）" if x == "parallel" else "顺序分析（稳定）",
+        )
+
+    with col2:
+        if analysis_mode == "parallel":
+            max_workers = st.number_input(
+                "并行线程数",
+                min_value=2,
+                max_value=5,
+                value=3
+            )
+        else:
+            max_workers = 1
+
+    st.markdown("---")
+
+    # 操作按钮
+    col_start, col_cancel = st.columns(2)
+
+    with col_start:
+        if st.button("🚀 确认启动后台分析", type="primary"):
+            # 启动后台任务
+            result = main_force_batch_scheduler.start_batch_analysis(
+                stock_codes=stock_codes,
+                analysis_mode=analysis_mode,
+                max_workers=max_workers
+            )
+
+            if result['success']:
+                st.success(f"✅ {result['message']}")
+                # 清除触发状态
+                if 'main_force_batch_trigger' in st.session_state:
+                    del st.session_state.main_force_batch_trigger
+                if 'main_force_batch_codes' in st.session_state:
+                    del st.session_state.main_force_batch_codes
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error(f"❌ {result['error']}")
+
+    with col_cancel:
+        if st.button("❌ 取消", type="secondary"):
+            if 'main_force_batch_trigger' in st.session_state:
+                del st.session_state.main_force_batch_trigger
+            if 'main_force_batch_codes' in st.session_state:
+                del st.session_state.main_force_batch_codes
+            st.rerun()
 

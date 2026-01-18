@@ -79,8 +79,10 @@ class SmartMonitorKline:
                     low=kline_data['最低'],
                     close=kline_data['收盘'],
                     name='K线',
-                    increasing_line_color='#ef5350',  # 红色（涨）
-                    decreasing_line_color='#26a69a'   # 绿色（跌）
+                    increasing_line_color='#FF0000',  # 标准红色（涨）
+                    increasing_fillcolor='#FF0000',   # 上涨实心红色
+                    decreasing_line_color='#00AA00',  # 标准绿色（跌）
+                    decreasing_fillcolor='#00AA00'    # 下跌实心绿色
                 ),
                 row=1, col=1
             )
@@ -164,13 +166,13 @@ class SmartMonitorKline:
             action_config = {
                 'buy': {
                     'symbol': 'triangle-up',
-                    'color': '#ef5350',
+                    'color': '#FF0000',
                     'text': '买入',
                     'size': 15
                 },
                 'sell': {
                     'symbol': 'triangle-down',
-                    'color': '#26a69a',
+                    'color': '#00AA00',
                     'text': '卖出',
                     'size': 15
                 },
@@ -268,12 +270,12 @@ class SmartMonitorKline:
             colors = []
             for i in range(len(kline_data)):
                 if i == 0:
-                    colors.append('#ef5350')
+                    colors.append('#FF0000')
                 else:
                     if kline_data.iloc[i]['收盘'] >= kline_data.iloc[i-1]['收盘']:
-                        colors.append('#ef5350')  # 红色（涨）
+                        colors.append('#FF0000')  # 标准红色（涨）
                     else:
-                        colors.append('#26a69a')  # 绿色（跌）
+                        colors.append('#00AA00')  # 标准绿色（跌）
             
             fig.add_trace(
                 go.Bar(

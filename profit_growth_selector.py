@@ -16,35 +16,49 @@ class ProfitGrowthSelector:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
     
-    def get_profit_growth_stocks(self, top_n: int = 5) -> Tuple[bool, Optional[pd.DataFrame], str]:
+    def get_profit_growth_stocks(self, top_n: int = 5, markets: list = None) -> Tuple[bool, Optional[pd.DataFrame], str]:
         """
         获取符合净利增长策略的股票
-        
+
         筛选条件：
         - 净利润增长率 ≥ 10%（净利润同比增长率）
-        - 深圳A股
+        - 按市场筛选
         - 非科创板
-        - 非创业板
         - 非ST
         - 按成交额由小到大排名
-        
+
         Args:
             top_n: 返回前N只股票
-            
+            markets: 市场列表，如 ["上海主板", "深圳主板", "创业板", "北交所"]
+
         Returns:
             (是否成功, 数据DataFrame, 消息)
         """
         try:
             import pywencai
-            
+
+            # 构建市场筛选条件
+            market_filter = ""
+            if markets:
+                market_conditions = []
+                for market in markets:
+                    if market == "上海主板":
+                        market_conditions.append("上海主板")
+                    elif market == "深圳主板":
+                        market_conditions.append("深圳主板")
+                    elif market == "创业板":
+                        market_conditions.append("创业板")
+                    elif market == "北交所":
+                        market_conditions.append("北交所")
+                if market_conditions:
+                    market_filter = "，" + "或".join(market_conditions)
+
             # 构建查询语句（按成交额由小至大排名）
             query = (
-                "净利润增长率(净利润同比增长率)≥10%，"
-                "非科创板，"
-                "非创业板，"
-                "非ST，"
-                "深圳A股，"
-                "成交额由小至大排名"
+                f"净利润增长率(净利润同比增长率)≥10%，"
+                f"非科创板，"
+                f"非ST{market_filter}，"
+                f"成交额由小至大排名"
             )
             
             self.logger.info(f"开始执行净利增长选股，查询条件: {query}")

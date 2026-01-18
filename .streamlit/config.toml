@@ -1,6 +1,14 @@
 [theme]
-base = "light"
+base = "dark"
+primaryColor = "#F0B90B"
+backgroundColor = "#0B0E11"
+secondaryBackgroundColor = "#1E2329"
+textColor = "#EAECEF"
+font = "serif"
 
 [server]
-port = 8503
+port = 8501
 address = "127.0.0.1"
+
+[browser]
+gatherUsageStats = false

@@ -26,12 +26,13 @@ class MainForceAnalyzer:
         self.raw_stocks = None
         self.final_recommendations = []
     
-    def run_full_analysis(self, start_date: str = None, days_ago: int = None, 
+    def run_full_analysis(self, start_date: str = None, days_ago: int = None,
                          final_n: int = None, max_range_change: float = None,
-                         min_market_cap: float = None, max_market_cap: float = None) -> Dict:
+                         min_market_cap: float = None, max_market_cap: float = None,
+                         markets: list = None) -> Dict:
         """
         运行完整的主力选股分析流程 - 整体批量分析
-        
+
         Args:
             start_date: 开始日期，格式如"2025年10月1日"
             days_ago: 距今多少天
@@ -39,7 +40,8 @@ class MainForceAnalyzer:
             max_range_change: 最大涨跌幅限制
             min_market_cap: 最小市值限制
             max_market_cap: 最大市值限制
-            
+            markets: 市场列表，如 ["上海主板", "深圳主板"]
+
         Returns:
             分析结果字典
         """
@@ -55,21 +57,23 @@ class MainForceAnalyzer:
                 'final_n': final_n,
                 'max_range_change': max_range_change,
                 'min_market_cap': min_market_cap,
-                'max_market_cap': max_market_cap
+                'max_market_cap': max_market_cap,
+                'markets': markets
             }
         }
-        
+
         try:
             print(f"\n{'='*80}")
             print(f"🚀 主力选股智能分析系统 - 批量整体分析")
             print(f"{'='*80}\n")
-            
+
             # 步骤1: 获取主力资金净流入前100名股票
             success, raw_data, message = self.selector.get_main_force_stocks(
                 start_date=start_date,
                 days_ago=days_ago,
                 min_market_cap=min_market_cap,
-                max_market_cap=max_market_cap
+                max_market_cap=max_market_cap,
+                markets=markets
             )
             
             if not success:

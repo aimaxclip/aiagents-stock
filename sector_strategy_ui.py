@@ -18,6 +18,47 @@ from sector_strategy_engine import SectorStrategyEngine
 from sector_strategy_pdf import SectorStrategyPDFGenerator
 from sector_strategy_db import SectorStrategyDatabase
 from sector_strategy_scheduler import sector_strategy_scheduler
+from selector_scheduler import selector_scheduler, run_sector_strategy_analysis as run_sector_bg_analysis
+
+
+def check_and_display_background_task() -> bool:
+    """检查并显示后台任务状态"""
+    running_tasks = selector_scheduler.get_running_tasks('sector_strategy')
+
+    if not running_tasks:
+        if 'sector_strategy_task_id' in st.session_state:
+            task = selector_scheduler.get_task_status(st.session_state.sector_strategy_task_id)
+            if task and task['status'] == 'completed':
+                st.success("✅ 后台分析任务已完成!")
+                if task.get('results') and task['results'].get('success'):
+                    st.session_state.sector_strategy_result = task['results']
+                del st.session_state.sector_strategy_task_id
+                st.rerun()
+            elif task and task['status'] == 'failed':
+                st.error(f"❌ 后台分析失败: {task.get('error_message', '未知错误')}")
+                del st.session_state.sector_strategy_task_id
+        return False
+
+    task = running_tasks[0]
+    st.info("⏳ 后台智策分析任务运行中...")
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        progress = task.get('progress_percent', 0) / 100
+        st.progress(progress)
+        st.caption(f"当前步骤: {task.get('current_step', '处理中...')} ({task.get('progress_percent', 0):.0f}%)")
+
+    with col2:
+        if st.button("取消任务", type="secondary"):
+            selector_scheduler.cancel_task(task['task_id'])
+            st.rerun()
+
+    st.markdown("---")
+    st.info("💡 您可以离开此页面，任务将在后台继续运行。稍后回来查看结果。")
+
+    time.sleep(2)
+    st.rerun()
+    return True
 
 
 def _parse_json_field(value, default):
@@ -39,14 +80,18 @@ def _parse_json_field(value, default):
 
 def display_sector_strategy():
     """显示智策板块分析主界面"""
-    
-    st.markdown("""
-    <div class="top-nav">
-        <h1 class="nav-title">🎯 智策 - AI驱动的板块策略分析</h1>
-        <p class="nav-subtitle">Multi-Agent Sector Strategy Analysis | 板块多空·轮动·热度预测</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
+
+    # 检查后台任务状态
+    if check_and_display_background_task():
+        return
+
+    # 页面标题（与主力选股风格一致）
+    col_title, col_history = st.columns([4, 1])
+    with col_title:
+        st.markdown("## 🎯 智策 - AI驱动的板块策略分析")
+    with col_history:
+        st.write("")  # 占位
+
     st.markdown("---")
     
     # 创建标签页
@@ -129,25 +174,47 @@ def display_analysis_tab():
         st.write("")
         st.write("")
         analyze_button = st.button("🚀 开始智策分析", type="primary", width='content')
-    
+
     with col3:
         st.write("")
         st.write("")
-        if st.button("🔄 清除结果", width='content'):
+        background_button = st.button("🔄 后台分析", width='content', help="提交后台任务，可离开页面")
+
+    # 添加清除按钮
+    col_clear, _ = st.columns([1, 5])
+    with col_clear:
+        if st.button("🗑️ 清除结果"):
             if 'sector_strategy_result' in st.session_state:
                 del st.session_state.sector_strategy_result
             st.success("已清除分析结果")
             st.rerun()
-    
+
     st.markdown("---")
-    
-    # 开始分析
+
+    # 前台分析
     if analyze_button:
         # 清除之前的结果
         if 'sector_strategy_result' in st.session_state:
             del st.session_state.sector_strategy_result
-        
+
         run_sector_strategy_analysis(selected_model)
+
+    # 后台分析
+    if background_button:
+        result = selector_scheduler.start_background_selection(
+            selector_type='sector_strategy',
+            selection_func=run_sector_bg_analysis,
+            params={'selected_model': selected_model}
+        )
+
+        if result.get('success'):
+            st.session_state.sector_strategy_task_id = result['task_id']
+            st.success("✅ 后台智策分析任务已启动")
+            st.info("💡 任务已提交到后台，您可以离开页面，稍后返回查看结果")
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.error(f"❌ {result.get('message', '启动失败')}")
     
     # 显示分析结果
     if 'sector_strategy_result' in st.session_state:
@@ -345,7 +412,8 @@ def display_data_summary(data):
             st.metric(
                 "上证指数",
                 f"{sh['close']:.2f}",
-                f"{sh['change_pct']:+.2f}%"
+                f"{sh['change_pct']:+.2f}%",
+                delta_color="inverse"
             )
     
     with col2:
@@ -353,7 +421,8 @@ def display_data_summary(data):
             st.metric(
                 "上涨股票",
                 market['up_count'],
-                f"{market['up_ratio']:.1f}%"
+                f"{market['up_ratio']:.1f}%",
+                delta_color="inverse"
             )
     
     with col3:
@@ -483,30 +552,20 @@ def display_predictions(predictions):
         bullish = predictions.get("long_short", {}).get("bullish", [])
         if bullish:
             for item in bullish:
-                st.markdown(f"""
-                <div class="agent-card" style="border-left-color: #4caf50;">
-                    <h4>{item.get('sector', 'N/A')} <span style="color: #4caf50;">↑</span></h4>
-                    <p><strong>信心度:</strong> {item.get('confidence', 0)}/10</p>
-                    <p><strong>理由:</strong> {item.get('reason', '')}</p>
-                    <p><strong>风险:</strong> {item.get('risk', '')}</p>
-                </div>
-                """, unsafe_allow_html=True)
+                with st.expander(f"📈 {item.get('sector', 'N/A')} | 信心度: {item.get('confidence', 0)}/10", expanded=True):
+                    st.markdown(f"**理由**: {item.get('reason', '')}")
+                    st.warning(f"**风险**: {item.get('risk', '')}")
         else:
             st.info("暂无看多板块")
-    
+
     with col2:
         st.markdown("#### 🔴 看空板块")
         bearish = predictions.get("long_short", {}).get("bearish", [])
         if bearish:
             for item in bearish:
-                st.markdown(f"""
-                <div class="agent-card" style="border-left-color: #f44336;">
-                    <h4>{item.get('sector', 'N/A')} <span style="color: #f44336;">↓</span></h4>
-                    <p><strong>信心度:</strong> {item.get('confidence', 0)}/10</p>
-                    <p><strong>理由:</strong> {item.get('reason', '')}</p>
-                    <p><strong>风险:</strong> {item.get('risk', '')}</p>
-                </div>
-                """, unsafe_allow_html=True)
+                with st.expander(f"📉 {item.get('sector', 'N/A')} | 信心度: {item.get('confidence', 0)}/10", expanded=True):
+                    st.markdown(f"**理由**: {item.get('reason', '')}")
+                    st.warning(f"**风险**: {item.get('risk', '')}")
         else:
             st.info("暂无看空板块")
     
@@ -597,38 +656,22 @@ def display_predictions(predictions):
     summary = predictions.get("summary", {})
     if summary:
         st.markdown("### 📝 策略总结")
-        
+
         col1, col2 = st.columns(2)
-        
+
         with col1:
-            st.markdown(f"""
-            <div class="decision-card">
-                <h4>💡 市场观点</h4>
-                <p>{summary.get('market_view', 'N/A')}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown(f"""
-            <div class="agent-card" style="border-left-color: #2196f3;">
-                <h4>🎯 核心机会</h4>
-                <p>{summary.get('key_opportunity', 'N/A')}</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
+            st.markdown("#### 💡 市场观点")
+            st.info(summary.get('market_view', 'N/A'))
+
+            st.markdown("#### 🎯 核心机会")
+            st.success(summary.get('key_opportunity', 'N/A'))
+
         with col2:
-            st.markdown(f"""
-            <div class="warning-card">
-                <h4>⚠️ 主要风险</h4>
-                <p>{summary.get('major_risk', 'N/A')}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown(f"""
-            <div class="agent-card" style="border-left-color: #ff9800;">
-                <h4>📋 整体策略</h4>
-                <p>{summary.get('strategy', 'N/A')}</p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("#### ⚠️ 主要风险")
+            st.warning(summary.get('major_risk', 'N/A'))
+
+            st.markdown("#### 📋 整体策略")
+            st.info(summary.get('strategy', 'N/A'))
 
 
 def display_agents_reports(agents_analysis):
@@ -653,40 +696,37 @@ def display_agents_reports(agents_analysis):
     for idx, tab in enumerate(tabs):
         with tab:
             agent = agent_data[idx]
-            
-            st.markdown(f"""
-            <div class="agent-card">
-                <h3>👨‍💼 {agent.get('agent_name', '未知')}</h3>
-                <p><strong>职责:</strong> {agent.get('agent_role', '未知')}</p>
-                <p><strong>关注领域:</strong> {', '.join(agent.get('focus_areas', []))}</p>
-                <p><strong>分析时间:</strong> {agent.get('timestamp', '未知')}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            
+
+            # 分析师信息卡片
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("分析师", agent.get('agent_name', '未知'))
+            with col2:
+                st.metric("职责", agent.get('agent_role', '未知'))
+            with col3:
+                st.metric("分析时间", agent.get('timestamp', '未知'))
+
+            st.caption(f"**关注领域**: {', '.join(agent.get('focus_areas', []))}")
+
             st.markdown("---")
-            
+
             st.markdown("### 📄 分析报告")
             st.write(agent.get("analysis", "暂无分析"))
 
 
 def display_comprehensive_report(report):
     """显示综合研判报告"""
-    
+
     st.subheader("📊 综合研判报告")
-    
+
     if not report:
         st.info("暂无综合研判数据")
         return
-    
-    st.markdown("""
-    <div class="decision-card">
-        <h4>🎯 智策综合研判</h4>
-        <p>基于四位专业分析师的深度分析，形成的全面市场和板块研判</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
+
+    st.info("🎯 **智策综合研判** - 基于四位专业分析师的深度分析，形成的全面市场和板块研判")
+
     st.markdown("---")
-    
+
     st.write(report)
 
 

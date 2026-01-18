@@ -4,9 +4,10 @@ from dotenv import load_dotenv
 # 加载环境变量（override=True 强制覆盖已存在的环境变量）
 load_dotenv(override=True)
 
-# DeepSeek API配置
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+# AI API配置（支持DeepSeek、字节方舟等OpenAI兼容API）
+# 优先使用 ARK_API_KEY（字节方舟），如果没有则使用 DEEPSEEK_API_KEY
+DEEPSEEK_API_KEY = os.getenv("ARK_API_KEY", os.getenv("DEEPSEEK_API_KEY", ""))
+DEEPSEEK_BASE_URL = os.getenv("ARK_BASE_URL", os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
 
 # 其他配置
 TUSHARE_TOKEN = os.getenv("TUSHARE_TOKEN", "")

@@ -20,16 +20,18 @@ class MainForceStockSelector:
         self.filtered_stocks = None
     
     def get_main_force_stocks(self, start_date: str = None, days_ago: int = None,
-                             min_market_cap: float = None, max_market_cap: float = None) -> Tuple[bool, pd.DataFrame, str]:
+                             min_market_cap: float = None, max_market_cap: float = None,
+                             markets: list = None) -> Tuple[bool, pd.DataFrame, str]:
         """
         获取主力资金净流入前100名股票
-        
+
         Args:
             start_date: 开始日期，格式如"2025年10月1日"，如果不提供则使用days_ago
             days_ago: 距今多少天
             min_market_cap: 最小市值限制
             max_market_cap: 最大市值限制
-            
+            markets: 市场列表，如 ["上海主板", "深圳主板", "创业板", "北交所"]
+
         Returns:
             (success, dataframe, message)
         """
@@ -38,31 +40,49 @@ class MainForceStockSelector:
             if not start_date:
                 date_obj = datetime.now() - timedelta(days=days_ago)
                 start_date = f"{date_obj.year}年{date_obj.month}月{date_obj.day}日"
-            
+
+            # 构建市场筛选条件
+            market_filter = ""
+            if markets:
+                # 将市场列表转换为问财查询格式
+                market_conditions = []
+                for market in markets:
+                    if market == "上海主板":
+                        market_conditions.append("上海主板")
+                    elif market == "深圳主板":
+                        market_conditions.append("深圳主板")
+                    elif market == "创业板":
+                        market_conditions.append("创业板")
+                    elif market == "北交所":
+                        market_conditions.append("北交所")
+                if market_conditions:
+                    market_filter = "，" + "或".join(market_conditions)
+
             print(f"\n{'='*60}")
             print(f"🔍 主力选股 - 数据获取中")
             print(f"{'='*60}")
             print(f"开始日期: {start_date}")
+            print(f"市场筛选: {markets if markets else '全部'}")
             print(f"目标: 获取主力资金净流入排名前100名股票")
-            
+
             # 构建查询语句 - 使用多个备选方案，所有方案都要求计算区间涨跌幅
             queries = [
                 # 方案1: 完整查询（最优）
-                f"{start_date}以来主力资金净流入排名，并计算区间涨跌幅，市值{min_market_cap}-{max_market_cap}亿之间，非科创非st，"
+                f"{start_date}以来主力资金净流入排名，并计算区间涨跌幅，市值{min_market_cap}-{max_market_cap}亿之间，非科创非st{market_filter}，"
                 f"所属同花顺行业，总市值，净利润，营收，市盈率，市净率，"
                 f"盈利能力评分，成长能力评分，营运能力评分，偿债能力评分，"
                 f"现金流评分，资产质量评分，流动性评分，资本充足性评分",
-                
+
                 # 方案2: 简化查询
-                f"{start_date}以来主力资金净流入，并计算区间涨跌幅，市值{min_market_cap}-{max_market_cap}亿，非科创非st，"
+                f"{start_date}以来主力资金净流入，并计算区间涨跌幅，市值{min_market_cap}-{max_market_cap}亿，非科创非st{market_filter}，"
                 f"所属同花顺行业，总市值，净利润，营收，市盈率，市净率",
-                
+
                 # 方案3: 基础查询
-                f"{start_date}以来主力资金净流入排名，并计算区间涨跌幅，市值{min_market_cap}-{max_market_cap}亿，非科创非st，"
+                f"{start_date}以来主力资金净流入排名，并计算区间涨跌幅，市值{min_market_cap}-{max_market_cap}亿，非科创非st{market_filter}，"
                 f"所属行业，总市值",
-                
+
                 # 方案4: 最简查询
-                f"{start_date}以来主力资金净流入前100名，并计算区间涨跌幅，市值{min_market_cap}-{max_market_cap}亿，非st非科创板，所属行业，总市值",
+                f"{start_date}以来主力资金净流入前100名，并计算区间涨跌幅，市值{min_market_cap}-{max_market_cap}亿，非st非科创板{market_filter}，所属行业，总市值",
             ]
             
             # 尝试不同的查询方案

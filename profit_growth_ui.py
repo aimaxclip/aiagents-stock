@@ -6,51 +6,179 @@
 
 import streamlit as st
 import pandas as pd
+import time
 from datetime import datetime
 from typing import List, Dict
 from profit_growth_selector import profit_growth_selector
 from notification_service import notification_service
 from profit_growth_monitor import profit_growth_monitor
+from selector_scheduler import selector_scheduler, run_profit_growth_selection
+from selector_task_db import selector_task_db
+
+
+def display_selection_history():
+    """显示选股历史记录"""
+    st.markdown("## 📚 净利增长选股历史")
+    st.markdown("---")
+
+    # 获取历史记录
+    tasks = selector_task_db.get_recent_tasks('profit_growth', limit=20)
+
+    if not tasks:
+        st.info("暂无选股历史记录")
+        if st.button("🔙 返回选股", type="primary"):
+            del st.session_state.show_profit_growth_history
+            st.rerun()
+        return
+
+    # 显示历史列表
+    for task in tasks:
+        status_emoji = {
+            'completed': '✅',
+            'failed': '❌',
+            'cancelled': '⚠️',
+            'running': '🔄',
+            'pending': '⏳'
+        }.get(task['status'], '❓')
+
+        task_time = task.get('created_at', '')[:19] if task.get('created_at') else 'N/A'
+        result_count = 0
+        if task.get('results') and task['results'].get('stocks'):
+            result_count = len(task['results']['stocks'])
+
+        with st.expander(f"{status_emoji} {task_time} - {task['status']} ({result_count}只股票)"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.caption(f"任务ID: {task['task_id'][:8]}...")
+                st.caption(f"状态: {task['status']}")
+                if task.get('completed_at'):
+                    st.caption(f"完成时间: {task['completed_at'][:19]}")
+
+            with col2:
+                if task.get('params'):
+                    params = task['params']
+                    st.caption(f"选股数量: {params.get('top_n', 'N/A')}")
+
+            # 显示结果
+            if task['status'] == 'completed' and task.get('results'):
+                results = task['results']
+                if results.get('stocks'):
+                    st.markdown("**选股结果:**")
+                    stocks_df = pd.DataFrame(results['stocks'])
+                    display_cols = [col for col in ['股票代码', '股票简称', '最新价', '涨跌幅', '净利润同比增长率'] if col in stocks_df.columns]
+                    if display_cols:
+                        st.dataframe(stocks_df[display_cols], use_container_width=True, height=200)
+                    else:
+                        st.dataframe(stocks_df.head(10), use_container_width=True, height=200)
+
+                    if st.button("📥 加载此结果", key=f"load_{task['task_id']}"):
+                        st.session_state.profit_growth_stocks = stocks_df
+                        st.session_state.profit_growth_time = task.get('completed_at', '')[:19]
+                        del st.session_state.show_profit_growth_history
+                        st.rerun()
+
+            elif task['status'] == 'failed':
+                st.error(f"失败原因: {task.get('error_message', '未知错误')}")
+
+    st.markdown("---")
+    if st.button("🔙 返回选股", type="primary"):
+        del st.session_state.show_profit_growth_history
+        st.rerun()
+
+
+def check_and_display_background_task() -> bool:
+    """检查并显示后台任务状态"""
+    running_tasks = selector_scheduler.get_running_tasks('profit_growth')
+
+    if not running_tasks:
+        if 'profit_growth_task_id' in st.session_state:
+            task = selector_scheduler.get_task_status(st.session_state.profit_growth_task_id)
+            if task and task['status'] == 'completed':
+                st.success("✅ 后台选股任务已完成!")
+                if task.get('results') and task['results'].get('success'):
+                    stocks_data = task['results'].get('stocks', [])
+                    if stocks_data:
+                        st.session_state.profit_growth_stocks = pd.DataFrame(stocks_data)
+                        st.session_state.profit_growth_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                del st.session_state.profit_growth_task_id
+                st.rerun()
+            elif task and task['status'] == 'failed':
+                st.error(f"❌ 后台选股失败: {task.get('error_message', '未知错误')}")
+                del st.session_state.profit_growth_task_id
+        return False
+
+    task = running_tasks[0]
+    st.info("⏳ 后台选股任务运行中...")
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        progress = task.get('progress_percent', 0) / 100
+        st.progress(progress)
+        st.caption(f"当前步骤: {task.get('current_step', '处理中...')} ({task.get('progress_percent', 0):.0f}%)")
+
+    with col2:
+        if st.button("取消任务", type="secondary"):
+            selector_scheduler.cancel_task(task['task_id'])
+            st.rerun()
+
+    st.markdown("---")
+    st.info("💡 您可以离开此页面，任务将在后台继续运行。")
+
+    time.sleep(2)
+    st.rerun()
+    return True
 
 
 def display_profit_growth():
     """显示净利增长策略界面"""
-    
+
     # 检查是否显示监控面板
     if st.session_state.get('show_profit_growth_monitor'):
         display_profit_growth_monitor_panel()
-        
+
         # 返回按钮
         if st.button("🔙 返回选股", type="secondary"):
             del st.session_state.show_profit_growth_monitor
             st.rerun()
         return
-    
-    st.markdown("### 顶部按钮区")
-    col_select, col_monitor = st.columns([3, 1])
-    
-    with col_select:
+
+    # 检查是否显示历史记录
+    if st.session_state.get('show_profit_growth_history'):
+        display_selection_history()
+        return
+
+    # 检查后台任务状态
+    if check_and_display_background_task():
+        return
+
+    # 顶部按钮区
+    col_title, col_monitor, col_history = st.columns([3, 1, 1])
+
+    with col_title:
         st.markdown("## 📈 净利增长策略 - 稳健成长股票筛选")
-    
+
     with col_monitor:
         st.write("")  # 占位
-        if st.button("📊 策略监控", type="primary", use_container_width=True):
+        if st.button("📊 策略监控", type="primary", width='content'):
             st.session_state.show_profit_growth_monitor = True
+            st.rerun()
+
+    with col_history:
+        st.write("")  # 占位
+        if st.button("📚 选股历史", width='content'):
+            st.session_state.show_profit_growth_history = True
             st.rerun()
     
     st.markdown("---")
     
     st.markdown("""
     ### 📋 选股策略说明
-    
+
     **筛选条件**：
     - ✅ 净利润增长率 ≥ 10%（净利润同比增长率）
-    - ✅ 深圳A股
-    - ✅ 非ST股票
-    - ✅ 非创业板
-    - ✅ 非科创板
     - ✅ 按成交额由小到大排名
-    
+
     **量化交易策略**：
     - 💰 资金量：5万元
     - 📅 持股周期：5天
@@ -65,10 +193,10 @@ def display_profit_growth():
     """)
     
     st.markdown("---")
-    
+
     # 参数设置
     col1, col2 = st.columns([2, 1])
-    
+
     with col1:
         top_n = st.slider(
             "筛选数量",
@@ -78,28 +206,82 @@ def display_profit_growth():
             step=1,
             help="选择展示的股票数量"
         )
-    
+
     with col2:
         st.info(f"💡 将筛选成交额最小的前{top_n}只股票")
-    
+
+    # 高级选项
+    with st.expander("⚙️ 高级筛选参数"):
+        # 市场选择
+        st.markdown("**市场选择**")
+        market_options = {
+            "上海主板": "上海主板",
+            "深圳主板": "深圳主板",
+            "创业板": "创业板",
+            "北交所": "北交所"
+        }
+        selected_markets = st.multiselect(
+            "选择市场",
+            options=list(market_options.keys()),
+            default=["上海主板", "深圳主板"],
+            help="选择要筛选的市场，默认为沪深主板",
+            key="profit_growth_markets"
+        )
+
     st.markdown("---")
-    
-    # 开始选股按钮
-    if st.button("🚀 开始净利增长选股", type="primary", use_container_width=True):
-        
+
+    # 选股按钮区域
+    btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
+
+    with btn_col1:
+        start_button = st.button("🚀 开始净利增长选股", type="primary", width='content')
+
+    with btn_col2:
+        background_button = st.button("🔄 后台选股", width='content', help="提交后台任务，可离开页面")
+
+    # 前台选股
+    if start_button:
+        # 验证市场选择
+        if not selected_markets:
+            st.error("请至少选择一个市场")
+            st.stop()
+
         with st.spinner("正在获取数据，请稍候..."):
-            # 创建选股器
-            success, stocks_df, message = profit_growth_selector.get_profit_growth_stocks(top_n)
-            
+            success, stocks_df, message = profit_growth_selector.get_profit_growth_stocks(
+                top_n=top_n,
+                markets=selected_markets
+            )
+
             if not success:
                 st.error(f"❌ {message}")
                 return
-            
+
             st.success(f"✅ {message}")
-            
+
             # 保存到session_state
             st.session_state.profit_growth_stocks = stocks_df
             st.session_state.profit_growth_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # 后台选股
+    if background_button:
+        if not selected_markets:
+            st.error("请至少选择一个市场")
+            st.stop()
+
+        result = selector_scheduler.start_background_selection(
+            selector_type='profit_growth',
+            selection_func=run_profit_growth_selection,
+            params={'top_n': top_n}
+        )
+
+        if result.get('success'):
+            st.session_state.profit_growth_task_id = result['task_id']
+            st.success("✅ 后台选股任务已启动")
+            st.info("💡 任务已提交到后台，您可以离开页面，稍后返回查看结果")
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.error(f"❌ {result.get('message', '启动失败')}")
     
     # 显示选股结果
     if 'profit_growth_stocks' in st.session_state and st.session_state.profit_growth_stocks is not None:
